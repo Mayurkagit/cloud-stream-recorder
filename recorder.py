@@ -12,7 +12,7 @@ API_HASH = os.environ["TG_API_HASH"]
 SESSION_STRING = os.environ["TG_SESSION"]
 CHANNEL_ID = int(os.environ["TG_CHANNEL_ID"])
 
-# We redirect FFmpeg stderr to a local log file to capture crashes
+# Corrected: Removed "follow_mouse ignore" to prevent FFmpeg initialization crashes
 FFMPEG_CMD = (
     "ffmpeg -y -f x11grab -video_size 1920x1080 -i :99.0 "
     "-f pulse -ac 2 -i default "
@@ -23,6 +23,7 @@ FFMPEG_CMD = (
 client = TelegramClient(StringSession(SESSION_STRING), API_ID, API_HASH)
 
 async def log_to_tg(message):
+    """Broadcasts real-time system logs directly to your Telegram channel"""
     print(message)
     try:
         await client.send_message(CHANNEL_ID, f"📝 **System Log:** {message}")
@@ -34,21 +35,21 @@ async def record_video(name, url, duration):
     log_file = f"{name}_ffmpeg.log"
     
     await log_to_tg(f"🎬 Initializing audio/video channels for: `{name}`")
-    await asyncio.sleep(3)  # Let the virtual environment breathe before running FFmpeg
+    await asyncio.sleep(3)  # Let the virtual environment settle down
     
-    # Open a text file to catch any errors FFmpeg throws
+    # Open text log to trap initialization errors
     with open(log_file, "w") as f_err:
         record_proc = subprocess.Popen(
             f"{FFMPEG_CMD} \"{output_file}\"",
             shell=True, stdout=subprocess.DEVNULL, stderr=f_err
         )
     
-    # Wait 2 seconds to check if FFmpeg stayed alive or instantly crashed
+    # Verify if FFmpeg started up cleanly
     await asyncio.sleep(2)
     if record_proc.poll() is not None:
         if os.path.exists(log_file):
             with open(log_file, "r") as f_err:
-                ffmpeg_errors = f_err.read()[-500:]  # Get the last 500 characters of the error
+                ffmpeg_errors = f_err.read()[-500:]
             await log_to_tg(f"⚠️ **FFmpeg Initialization Failed instantly!** Error log:\n```{ffmpeg_errors}```")
         return None
 
@@ -72,7 +73,7 @@ async def record_video(name, url, duration):
         await log_to_tg(f"🚀 Loading targeted streaming endpoint: {url}")
         await page.goto(url)
         
-        await asyncio.sleep(5)  # Let video player settle layout
+        await asyncio.sleep(5)  # Let video elements mount onto viewport
         
         await log_to_tg(f"⏳ Now recording live... process will hold for **{duration} seconds**.")
         await asyncio.sleep(duration)
@@ -83,7 +84,6 @@ async def record_video(name, url, duration):
     record_proc.terminate()
     record_proc.wait()
     
-    # Clean up the error log if everything went fine
     if os.path.exists(log_file):
         os.remove(log_file)
         
@@ -112,11 +112,11 @@ async def main():
                 await log_to_tg(f"📦 Recording finished. Local payload size: `{file_size_mb:.2f} MB`. Sending raw file to channel...")
                 
                 if file_size_mb > 0:
+                    # Updated: Removed supports_streaming=True to upload as a traditional file attachment
                     await client.send_file(
                         CHANNEL_ID,
                         file_path,
-                        caption=f"🎥 **Name:** {name}\n⏱️ **Duration:** {duration}s",
-                        supports_streaming=True
+                        caption=f"🎥 **Name:** {name}\n⏱️ **Duration:** {duration}s"
                     )
                     await log_to_tg(f"✅ Success! `{name}` uploaded perfectly.")
                     os.remove(file_path)
@@ -130,6 +130,7 @@ async def main():
             await log_to_tg(f"💥 **Pipeline Error Caught on `{name}`:**\n```{str(e)}```")
             print(err_stack)
             
+        # Anti-ban cool-down period between items
         if idx < len(queue):
             await log_to_tg("🛡️ **Anti-Ban Interval:** Sleeping for 10 seconds to maintain a safe request profile...")
             await asyncio.sleep(10)
