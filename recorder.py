@@ -2,6 +2,7 @@ import json
 import os
 import asyncio
 import subprocess
+import traceback
 from telethon import TelegramClient
 from telethon.sessions import StringSession
 from playwright.async_api import async_playwright
@@ -18,36 +19,52 @@ FFMPEG_CMD = (
     "-c:a aac -b:a 128k "
 )
 
+client = TelegramClient(StringSession(SESSION_STRING), API_ID, API_HASH)
+
+async def log_to_tg(message):
+    """Helper function to broadcast real-time status logs directly into your channel"""
+    print(message)
+    try:
+        await client.send_message(CHANNEL_ID, f"📝 **System Log:** {message}")
+    except Exception as e:
+        print(f"Failed to log to TG: {e}")
+
 async def record_video(name, url, duration):
     output_file = f"{name}.mp4"
-    print(f"\n🖥️ Initializing virtual recorder for: {name}")
+    await log_to_tg(f"🎬 Starting virtual recorder setup for: `{name}`")
     
+    # Fire up background screen capture recorder
     record_proc = subprocess.Popen(
         f"{FFMPEG_CMD} \"{output_file}\"",
         shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
     )
     
     async with async_playwright() as p:
+        await log_to_tg("🌐 Launching secure browser environment...")
         browser = await p.chromium.launch(headless=False, args=["--start-maximized"])
         
         if os.path.exists("auth_state.json"):
-            print("🔑 Injecting authenticated session state into cloud browser...")
+            await log_to_tg("🔑 Injecting active authentication state cookies...")
             context = await browser.new_context(
                 storage_state="auth_state.json",
                 viewport={"width": 1920, "height": 1080},
                 user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
             )
         else:
+            await log_to_tg("⚠️ Warning: auth_state.json missing! Running unauthenticated...")
             context = await browser.new_context(viewport={"width": 1920, "height": 1080})
             
         page = await context.new_page()
-        print(f"🌐 Navigating to URL...")
+        
+        await log_to_tg(f"🚀 Loading targeted streaming endpoint: {url}")
         await page.goto(url)
         
-        await asyncio.sleep(5) # buffer pause
+        await asyncio.sleep(5)  # Let video player settle layout
         
-        print(f"⏳ Recording active... sleeping for {duration} seconds.")
+        await log_to_tg(f"⏳ Now recording live... process will hold for **{duration} seconds**.")
         await asyncio.sleep(duration)
+        
+        await log_to_tg("🛑 Recording period completed. Closing cloud browser instance...")
         await browser.close()
         
     record_proc.terminate()
@@ -55,34 +72,52 @@ async def record_video(name, url, duration):
     return output_file
 
 async def main():
-    client = TelegramClient(StringSession(SESSION_STRING), API_ID, API_HASH)
     await client.start()
     
     with open("links.json", "r") as f:
         queue = json.load(f)
         
-    print(f"📋 Loaded {len(queue)} items into the pipeline.")
+    await log_to_tg(f"📋 Pipeline loaded successfully. Total items found in batch: **{len(queue)}**")
     
     for idx, item in enumerate(queue, start=1):
         name = item["name"]
         url = item["url"]
         duration = item.get("duration", 60)
         
-        print(f"\n=== Processing Batch [{idx}/{len(queue)}] ===")
+        await log_to_tg(f"🔄 **[Batch Element {idx}/{len(queue)}]** Processing `{name}`")
+        
         try:
             file_path = await record_video(name, url, duration)
-            if os.path.exists(file_path) and os.path.getsize(file_path) > 0:
-                print(f"📤 Uploading directly to Telegram...")
-                await client.send_file(
-                    CHANNEL_ID,
-                    file_path,
-                    caption=f"🎥 **Name:** {name}",
-                    supports_streaming=True
-                )
-                os.remove(file_path)
+            
+            if os.path.exists(file_path):
+                file_size_mb = os.path.getsize(file_path) / (1024 * 1024)
+                await log_to_tg(f"📦 Recording finished. Local payload size: `{file_size_mb:.2f} MB`. Sending raw file to channel...")
+                
+                if file_size_mb > 0:
+                    await client.send_file(
+                        CHANNEL_ID,
+                        file_path,
+                        caption=f"🎥 **Name:** {name}\n⏱️ **Duration:** {duration}s",
+                        supports_streaming=True
+                    )
+                    await log_to_tg(f"✅ Success! `{name}` uploaded perfectly.")
+                    os.remove(file_path)
+                else:
+                    await log_to_tg(f"❌ Aborted: Captured video file size is 0 bytes for `{name}`. Page might have failed to load.")
+            else:
+                await log_to_tg(f"❌ Aborted: The expected file path `{file_path}` was not generated by FFmpeg.")
+                
         except Exception as e:
-            print(f"⚠️ Error skipped: {str(e)}")
-            continue
+            err_stack = traceback.format_exc()
+            await log_to_tg(f"💥 **Pipeline Error Caught on `{name}`:**\n```{str(e)}```")
+            print(err_stack)
+            
+        # Anti-ban dynamic gap: Pause before switching context to the next item
+        if idx < len(queue):
+            await log_to_tg("🛡️ **Anti-Ban Interval:** Sleeping for 10 seconds to maintain a safe request profile...")
+            await asyncio.sleep(10)
+            
+    await log_to_tg("🏁 All batch jobs processed. Pipeline execution shutdown complete.")
 
 if __name__ == "__main__":
     asyncio.run(main())
