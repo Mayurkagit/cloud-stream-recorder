@@ -1,0 +1,52 @@
+name: Automated Cloud Streaming Pipeline
+
+on:
+  workflow_dispatch:
+
+jobs:
+  stream_and_record:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository Files
+        uses: actions/checkout@v4
+
+      - name: Deploy Linux Audio and Virtual Display Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xdotool ffmpeg xvfb pulseaudio dbus-x11
+
+      - name: Configure Python Environment
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+          cache: 'pip'
+
+      - name: Install Project Requirements
+        run: pip install -r requirements.txt
+
+      - name: Set Up Playwright System Browsers
+        run: playwright install chromium
+
+      - name: Inject Authenticated Storage State
+        env:
+          AUTH_SECRET: ${{ secrets.AUTH_STATE_JSON }}
+        run: |
+          echo "$AUTH_SECRET" > auth_state.json
+
+      - name: Initialize Virtual Framebuffer and Audio Mixers
+        run: |
+          Xvfb :99 -screen 0 1920x1080x24 &
+          echo "DISPLAY=:99" >> $GITHUB_ENV
+          pulseaudio --start --exit-idle-time=-1
+          pactl load-module module-null-sink sink_name=default
+          pactl set-default-sink default
+
+      - name: Execute Sequence Engine Loop
+        env:
+          TG_API_ID: ${{ secrets.TG_API_ID }}
+          TG_API_HASH: ${{ secrets.TG_API_HASH }}
+          TG_SESSION: ${{ secrets.TG_SESSION }}
+          TG_CHANNEL_ID: ${{ secrets.TG_CHANNEL_ID }}
+        run: |
+          export DISPLAY=:99
+          python recorder.py
