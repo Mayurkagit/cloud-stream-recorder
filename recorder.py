@@ -14,7 +14,7 @@ CHANNEL_ID = int(os.environ["TG_CHANNEL_ID"])
 
 # We redirect FFmpeg stderr to a local log file to capture crashes
 FFMPEG_CMD = (
-    "ffmpeg -y -f x11grab -video_size 1920x1080 -follow_mouse ignore -i :99.0 "
+    "ffmpeg -y -f x11grab -video_size 1920x1080 -i :99.0 "
     "-f pulse -ac 2 -i default "
     "-c:v libx264 -preset ultrafast -crf 23 -pix_fmt yuv420p "
     "-c:a aac -b:a 128k "
